@@ -1,17 +1,24 @@
-# Use the official Python image as a base image
-FROM python:3.8-slim
+# Use a specific version of Python for better consistency
+FROM python:3.8.10-slim
+
+# Set environment variables to optimize the build process
+ENV PYTHONUNBUFFERED 1
+ENV PYTHONDONTWRITEBYTECODE 1
 
 # Set the working directory in the container
 WORKDIR /app
 
-# Copy the current directory contents into the container at /app
-COPY . /app
+# Copy only necessary files, reducing the image size
+COPY requirements.txt /app/
 
-# Install any dependencies specified in requirements.txt
+# Install the dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Expose the port on which the app will run
+# Copy the rest of the application code
+COPY . /app/
+
+# Expose the port the app will run on
 EXPOSE 5000
 
-# Run the command to start the app
-CMD ["python", "app.py"]
+# Use a production-ready WSGI server (Gunicorn for Flask apps)
+CMD ["gunicorn", "-b", "0.0.0.0:5000", "app:app"]
