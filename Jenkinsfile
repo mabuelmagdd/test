@@ -1,14 +1,12 @@
 pipeline {
     agent any
     environment {
-        DOCKER_HUB_CREDENTIALS = credentials('docker-hub-credentials')  
+        DOCKER_HUB_CREDENTIALS = credentials('docker-hub-credentials')
         IMAGE_NAME = "nginx-test"
-        IMAGE_TAG = "${BUILD_NUMBER}"  
+        IMAGE_TAG = "latest"  
         REGISTRY = "docker.io"
         DEPLOYMENT_FILE = "deployment.yaml"
-        OC_SERVER = "https://api.ocp-training.ivolve-test.com:6443"
-        OC_NAMESPACE = "maryamabualmaged"  // Replace with your OpenShift namespace
-        OC_TOKEN = credentials('oc-jenkins-token')  // OpenShift token stored in Jenkins
+        K8S_TOKEN = credentials('k8s-token')  // Token for Kubernetes authentication
     }
 
     stages {
@@ -21,7 +19,7 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    sh 'docker build -f Dockerfile -t ${REGISTRY}/${DOCKER_HUB_CREDENTIALS_USR}/${IMAGE_NAME}:latest .'
+                    sh 'docker build -f Dockerfile -t ${REGISTRY}/${DOCKER_HUB_CREDENTIALS_USR}/${IMAGE_NAME}:${IMAGE_TAG} .'
                 }
             }
         }
@@ -32,41 +30,41 @@ pipeline {
                     withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
                         sh 'echo $DOCKER_PASSWORD | docker login -u $DOCKER_USERNAME --password-stdin'
                     }
-                    sh 'docker push ${REGISTRY}/${DOCKER_HUB_CREDENTIALS_USR}/${IMAGE_NAME}:latest'
+                    sh 'docker push ${REGISTRY}/${DOCKER_HUB_CREDENTIALS_USR}/${IMAGE_NAME}:${IMAGE_TAG}'
                 }
             }
         }
 
-        stage('Deploy to OpenShift') {
+        stage('Update Deployment YAML') {
+            steps {
+                script {
+                    sh "sed -i 's|image:.*|image: ${REGISTRY}/${DOCKER_HUB_CREDENTIALS_USR}/${IMAGE_NAME}:${IMAGE_TAG}|g' ${DEPLOYMENT_FILE}"
+                }
+            }
+        }
+
+        stage('Deploy to Minikube') {
             steps {
                 script {
                     sh '''
-                    # Log in to OpenShift using Jenkins ServiceAccount token
-                    oc login ${OC_SERVER} --token=${OC_TOKEN} --insecure-skip-tls-verify=true
-                    
-                    # Switch to the target namespace
-                    oc project ${OC_NAMESPACE}
-
-                    # Deploy using the deployment file
-                    if [ -f "${DEPLOYMENT_FILE}" ]; then
-                        oc apply -f "${DEPLOYMENT_FILE}"
-                    else
-                        echo "Error: Deployment file '${DEPLOYMENT_FILE}' not found. Exiting."
-                        exit 1
-                    fi
-                    
-                    # Verify deployment
-                    #oc rollout status deployment/${IMAGE_NAME} --timeout=60s
+                    export KUBECONFIG=~/.kube/config
+                
+                    # Apply the deployment file
+                    kubectl apply -f ${DEPLOYMENT_FILE}
+        
+                    # Validate the deployment
+                    #kubectl rollout status deployment/${IMAGE_NAME} --timeout=60s
                     '''
-                }
             }
         }
+    }
+
     }
 
     post {
         always {
             script {
-                sh 'docker rmi ${REGISTRY}/${DOCKER_HUB_CREDENTIALS_USR}/${IMAGE_NAME}:latest'
+                sh 'docker rmi ${REGISTRY}/${DOCKER_HUB_CREDENTIALS_USR}/${IMAGE_NAME}:${IMAGE_TAG}'
             }
         }
     }
